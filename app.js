@@ -12,7 +12,7 @@ const DEFAULTS=[
  ['calories','Kalorien','kcal','number',['cross','ergo']],
  ['notes','Notizen','','text',['walking','cycling','swimming','nordic','cross','ergo']]
 ];
-let db=load(),view='home',current='walking',editing=null;ensureDefaults();
+let db=load(),view='home',current='walking',editing=null,deferredInstallPrompt=null;ensureDefaults();
 function fresh(){return{version:2,metrics:[],activities:[],favorites:[]}}
 function load(){try{let x=JSON.parse(localStorage.getItem(KEY));return x&&Array.isArray(x.activities)?x:fresh()}catch{return fresh()}}
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
@@ -21,7 +21,7 @@ function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt
 function icon(k){return `<img class="sport-pictogram" src="./icons/sports/${k}.png" alt="" aria-hidden="true">`}
 function nav(){return `<nav class="nav"><button onclick="go('home')">Start</button><button onclick="go('data')">Daten</button><button onclick="go('chart')">Auswertung</button><button onclick="go('settings')">Setup</button></nav>`}
 function render(){document.querySelector('#app').innerHTML=`<main class="shell">${view==='home'?home():view==='data'?dataPage():view==='sport'?sportPage():view==='chart'?chartPage():settings()}</main>${nav()}`;if(view==='chart')setTimeout(drawChart)}
-function home(){return `<div class="hero"><h1>Mein<br>Sport</h1><p>Deine Aktivitäten. Deine Daten.</p></div><div class="grid">${SPORTS.map(s=>`<button class="sport" onclick="openSport('${s[0]}')">${icon(s[0])}<b>${s[1]}</b><span class="small">${db.activities.filter(a=>a.sport===s[0]).length} Einträge</span></button>`).join('')}</div>`}
+function home(){return `<div class="hero"><h1>Mein<br>Sport</h1><p>Deine Aktivitäten. Deine Daten.</p><button id="installBtn" class="btn" onclick="installApp()">${isStandalone()?'App ist installiert':'App installieren'}</button></div><div class="grid">${SPORTS.map(s=>`<button class="sport" onclick="openSport('${s[0]}')">${icon(s[0])}<b>${s[1]}</b><span class="small">${db.activities.filter(a=>a.sport===s[0]).length} Einträge</span></button>`).join('')}</div>`}
 function activitySummary(a){return Object.entries(a.values||{}).map(([id,v])=>{let m=db.metrics.find(x=>x.id===id);return m&&v!==''?`${esc(m.name)}: ${esc(v)} ${esc(m.unit||'')}`:''}).filter(Boolean).join(' · ')}
 function dataPage(){let arr=[...db.activities].sort((a,b)=>b.date.localeCompare(a.date));return `<div class="top"><div class="brand">Daten</div><button class="btn" onclick="newEntry()">+ Eintrag</button></div><div class="panel">${arr.length?arr.map(a=>`<div class="activity"><b>${SPORTS.find(s=>s[0]===a.sport)?.[1]}</b> · ${a.date}<div class="small">${activitySummary(a)||'Keine Messwerte eingetragen'}</div><div class="row"><button class="pill" onclick="editAct('${a.id}')">Bearbeiten</button><button class="pill" onclick="delAct('${a.id}')">Löschen</button></div></div>`).join(''):'<div class="empty">Noch keine Aktivitäten.</div>'}</div>`}
 function sportPage(){let a=editing?db.activities.find(x=>x.id===editing):null;if(a)current=a.sport;let sport=SPORTS.find(s=>s[0]===current)||SPORTS[0],ms=db.metrics.filter(m=>m.sports.includes(current));return `<div class="top"><div class="brand">${sport[1]}</div>${icon(current)}</div><form class="panel stack" onsubmit="saveAct(event)"><h2>${a?'Aktivität bearbeiten':'Neue Aktivität'}</h2><p class="small">Alle Angaben sind optional und können später geändert oder gelöscht werden.</p><label>Datum<input name="date" type="date" value="${a?.date||new Date().toISOString().slice(0,10)}"></label>${ms.map(m=>`<label>${esc(m.name)}${m.unit?' ('+esc(m.unit)+')':''}<input name="m_${m.id}" type="${m.type==='number'?'number':'text'}" step="any" value="${esc(a?.values?.[m.id]??'')}"></label>`).join('')}<button class="btn">${a?'Änderungen speichern':'Speichern'}</button>${a?`<button type="button" class="btn alt" onclick="cancelEdit()">Abbrechen</button>`:''}</form>`}
@@ -38,4 +38,13 @@ function drawChart(){let c=document.querySelector('#chart');if(!c)return;let ctx
 function saveFav(){let ids=selected(),name=document.querySelector('#favName').value.trim();if(!ids.length||!name)return alert('Bitte Datenreihen wählen und einen Namen eingeben.');db.favorites.push({id:crypto.randomUUID(),name,metricIds:ids});save();render()}function loadFav(id){let f=db.favorites.find(x=>x.id===id);document.querySelectorAll('.series').forEach(x=>x.checked=f.metricIds.includes(x.value));drawChart()}function delFav(id){db.favorites=db.favorites.filter(f=>f.id!==id);save();render()}
 function exportData(){let blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`mein-sport-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}
 document.querySelector('#importFile').addEventListener('change',async e=>{let f=e.target.files[0];if(!f)return;try{let x=JSON.parse(await f.text());if(!x.metrics||!x.activities||!x.favorites)throw 0;if(confirm('Import ersetzt alle aktuellen Daten. Fortfahren?')){db=x;ensureDefaults();save();render()}}catch{alert('Ungültige Backup-Datei.')}e.target.value=''})
-if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');render();
+function isStandalone(){return window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true}
+async function installApp(){
+ if(isStandalone())return alert('Du verwendest Mein Sport bereits als installierte App.');
+ if(deferredInstallPrompt){deferredInstallPrompt.prompt();let choice=await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;updateInstallButton();if(choice.outcome!=='accepted')return;return}
+ alert('Android/Chrome meldet diese PWA bereits als installiert oder bietet den Installationsdialog gerade nicht an. Öffne sie über das App-Symbol auf deinem Startbildschirm. Falls du sie neu installieren möchtest, deinstalliere zuerst die vorhandene Mein-Sport-App und lade diese Seite anschließend neu.');
+}
+function updateInstallButton(){let b=document.querySelector('#installBtn');if(!b)return;b.textContent=isStandalone()?'App ist installiert':(deferredInstallPrompt?'App installieren':'App öffnen / installieren')}
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;updateInstallButton()});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;updateInstallButton()});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');render();updateInstallButton();
