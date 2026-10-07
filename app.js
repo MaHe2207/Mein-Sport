@@ -1,3 +1,4 @@
+const APP_VERSION = '0.7.0';
 const SPORTS=[['walking','Walking'],['cycling','Rad fahren'],['swimming','Schwimmen'],['nordic','Nordic Walking'],['cross','Crosstrainer'],['ergo','Ergometer']];
 const KEY='meinSportDataV1';
 const DEFAULTS=[
@@ -55,3 +56,26 @@ function updateInstallButton(){let b=document.querySelector('#installBtn');if(!b
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;updateInstallButton()});
 window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;updateInstallButton()});
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');render();updateInstallButton();
+
+function ensureVersionBadge() {
+  let badge = document.getElementById('app-version-badge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'app-version-badge';
+    badge.className = 'app-version-badge';
+    document.body.appendChild(badge);
+  }
+  badge.textContent = `Mein Sport · v${APP_VERSION}`;
+}
+window.addEventListener('DOMContentLoaded', ensureVersionBadge);
+setTimeout(ensureVersionBadge, 0);
+
+function ensureVersionStyle() {
+  if (document.getElementById('version-style')) return;
+  const st = document.createElement('style');
+  st.id = 'version-style';
+  st.textContent = `.app-version-badge{position:fixed;right:10px;bottom:78px;z-index:9999;background:rgba(20,20,20,.82);color:#fff;padding:5px 9px;border-radius:999px;font:700 11px/1.2 system-ui,-apple-system,sans-serif;letter-spacing:.02em;box-shadow:0 2px 8px rgba(0,0,0,.15)}`;
+  document.head.appendChild(st);
+}
+window.addEventListener('DOMContentLoaded', ensureVersionStyle);
+setTimeout(ensureVersionStyle, 0);
