@@ -1,15 +1,15 @@
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 const SPORTS=[['walking','Walking'],['cycling','Rad fahren'],['swimming','Schwimmen'],['nordic','Nordic Walking'],['cross','Crosstrainer'],['ergo','Ergometer']];
 const KEY='meinSportDataV1';
 
 const SPORT_COLORS={walking:'#25aee4',cycling:'#67cf70',swimming:'#ff812b',nordic:'#ffd238',cross:'#aa8df0',ergo:'#31c3c8'};
 const CHARTS={
- walking:[['distance','Distanz'],['duration','Dauer'],['heart','Herzfrequenz'],['steps','Schritte'],['elevation','Höhenmeter'],['effort','Belastung']],
- cycling:[['distance','Distanz'],['duration','Dauer'],['speed','Ø Geschwindigkeit'],['heart','Herzfrequenz'],['elevation','Höhenmeter'],['effort','Belastung']],
- swimming:[['distance','Distanz'],['duration','Dauer'],['pace','Pace'],['lanes','Bahnen'],['heart','Herzfrequenz'],['effort','Belastung']],
- nordic:[['distance','Distanz'],['duration','Dauer'],['speed','Ø Geschwindigkeit'],['heart','Herzfrequenz'],['steps','Schritte'],['elevation','Höhenmeter'],['effort','Belastung']],
- cross:[['duration','Dauer'],['power','Ø Leistung'],['heart','Herzfrequenz'],['distance','Distanz'],['calories','Kalorien'],['effort','Belastung']],
- ergo:[['duration','Dauer'],['power','Ø Leistung'],['heart','Herzfrequenz'],['distance','Distanz'],['calories','Kalorien'],['effort','Belastung']]
+ walking:[['distance','Distanz'],['duration','Dauer'],['heart','Puls'],['steps','Schritte'],['speed','Ø Geschwindigkeit'],['calories','Kalorien']],
+ cycling:[['distance','Distanz'],['duration','Dauer'],['speed','Ø Geschwindigkeit'],['maxspeed','Max. Geschwindigkeit'],['heart','Puls'],['battery','Akkuanzeige']],
+ swimming:[['distance','Distanz'],['duration','Dauer'],['lanes','Bahnen'],['heart','Puls']],
+ nordic:[['distance','Distanz'],['duration','Dauer'],['speed','Ø Geschwindigkeit'],['heart','Puls'],['steps','Schritte'],['calories','Kalorien']],
+ cross:[['duration','Dauer'],['power','Ø Leistung'],['heart','Puls'],['distance','Distanz'],['calories','Kalorien']],
+ ergo:[['duration','Dauer'],['power','Ø Leistung'],['heart','Puls'],['distance','Distanz'],['speed','Ø Geschwindigkeit'],['calories','Kalorien']]
 };
 function sportStyle(k){return `--sport:${SPORT_COLORS[k]||'#19a8d8'}`}
 function derivedValue(a,id){let v=a.values?.[id];if(v!==undefined&&v!==''&&Number.isFinite(Number(v)))return Number(v);let d=Number(a.values?.distance),min=Number(a.values?.duration);if(id==='speed'&&d>0&&min>0)return d/(min/60);if(id==='pace'&&d>0&&min>0)return min/d;return null}
@@ -17,26 +17,73 @@ function chartUnit(id){if(id==='speed')return 'km/h';if(id==='pace')return 'min/
 function chartLabel(id){if(id==='speed')return 'Ø Geschwindigkeit';if(id==='pace')return 'Pace';return db.metrics.find(x=>x.id===id)?.name||id}
 
 const DEFAULTS=[
+ ['title','Titel','','text',['walking','cycling','swimming','nordic','cross','ergo']],
  ['duration','Dauer','min','number',['walking','cycling','swimming','nordic','cross','ergo']],
  ['distance','Distanz','km','number',['walking','cycling','swimming','nordic','cross','ergo']],
- ['heart','Ø Herzfrequenz','bpm','number',['walking','cycling','swimming','nordic','cross','ergo']],
- ['effort','Belastung','1–10','number',['walking','cycling','swimming','nordic','cross','ergo']],
- ['elevation','Höhenmeter','m','number',['walking','cycling','nordic']],
+ ['heart','Puls','bpm','number',['walking','cycling','swimming','nordic','cross','ergo']],
  ['steps','Schritte','','number',['walking','nordic']],
  ['lanes','Bahnen','','number',['swimming']],
  ['power','Ø Leistung','W','number',['cross','ergo']],
- ['calories','Kalorien','kcal','number',['cross','ergo']],
+ ['calories','Kalorien','kcal','number',['walking','nordic','cross','ergo']],
+ ['speed','Ø Geschwindigkeit','km/h','number',['walking','cycling','nordic','ergo']],
+ ['maxspeed','Max. Geschwindigkeit','km/h','number',['cycling']],
+ ['total_km','Gesamtkilometer','','text',['cycling','ergo']],
+ ['eco_range','Restreichweite / Eco-Level','km','number',['cycling']],
+ ['tour_no','Tour Nr.','','text',['cycling']],
+ ['participants','Teilnehmer','','text',['cycling']],
+ ['stopover','Einkehr','','text',['cycling']],
+ ['route_type','Streckenart','','text',['cycling']],
+ ['tour_type','Tourart','','text',['cycling']],
+ ['battery','Akkuanzeige','','select',['cycling']],
+ ['program','Programm','','text',['ergo']],
+ ['level','Level','','text',['ergo']],
  ['notes','Notizen','','text',['walking','cycling','swimming','nordic','cross','ergo']]
 ];
+const RETIRED_FIELDS=['effort','elevation','pace'];
 let db=load(),view='home',current=null,editing=null,chartSport='walking',chartMetric='distance',dataSport='all',dataSort='date-desc',expandedActivity=null,chartState={points:[],selected:null,zoom:1,start:0,pinch:null},deferredInstallPrompt=null;ensureDefaults();
-function fresh(){return{version:2,metrics:[],activities:[],favorites:[]}}
+function fresh(){return{version:2,metrics:[],activities:[],favorites:[],fieldOrder:{},settings:[]}}
 function load(){try{let x=JSON.parse(localStorage.getItem(KEY));return x&&Array.isArray(x.activities)?x:fresh()}catch{return fresh()}}
 function save(){
   const old=load();
+  db.settings=[{id:'field-order',value:db.fieldOrder||{}}];
   localStorage.setItem(KEY,JSON.stringify(db));
   if(window.meinSportSync) window.meinSportSync.localChange(old,db);
 }
-function ensureDefaults(){db.metrics=db.metrics||[];db.activities=db.activities||[];db.favorites=db.favorites||[];for(const [id,name,unit,type,sports] of DEFAULTS)if(!db.metrics.some(m=>m.id===id))db.metrics.push({id,name,unit,type,sports:[...sports],standard:true});db.version=2;save()}
+function ensureDefaults(){
+ db.metrics=db.metrics||[];db.activities=db.activities||[];db.favorites=db.favorites||[];
+ db.fieldOrder=db.settings?.find(x=>x.id==='field-order')?.value||db.fieldOrder||{};
+ for(const [id,name,unit,type,sports] of DEFAULTS){
+  let m=db.metrics.find(x=>x.id===id);
+  if(!m)db.metrics.push({id,name,unit,type,sports:[...sports],standard:true});
+  else if(!db.schemaV10){
+   m.name=name;m.unit=unit;m.type=type;m.sports=[...sports];m.standard=true;
+  }
+ }
+ if(!db.schemaV10){
+  db.metrics=db.metrics.filter(m=>!RETIRED_FIELDS.includes(m.id));
+  db.schemaV10=true;
+ }
+ db.version=3;save();
+}
+function orderedMetrics(sport){
+ let list=db.metrics.filter(m=>m.sports.includes(sport));
+ let order=db.fieldOrder?.[sport]||[];
+ return list.sort((a,b)=>{
+  let ia=order.indexOf(a.id),ib=order.indexOf(b.id);
+  return (ia<0?10000+db.metrics.indexOf(a):ia)-(ib<0?10000+db.metrics.indexOf(b):ib);
+ });
+}
+function moveField(sport,id,direction){
+ let list=orderedMetrics(sport).map(m=>m.id),i=list.indexOf(id),j=i+direction;
+ if(i<0||j<0||j>=list.length)return;
+ [list[i],list[j]]=[list[j],list[i]];
+ db.fieldOrder[sport]=list;save();render();
+}
+function fieldOrderPanel(){
+ return `<section class="panel"><h2>Reihenfolge der Felder</h2><p class="small">Die Reihenfolge gilt für Eingabe und aufgeklappte Datenansicht. Änderungen werden pro Sportart gespeichert.</p>
+ ${SPORTS.map(sp=>`<details class="order-sport"><summary style="font-weight:700;padding:12px 0">${sp[1]}</summary>
+ ${orderedMetrics(sp[0]).map((m,i,arr)=>`<div class="metric"><span>${esc(m.name)}</span><div class="row"><button type="button" class="pill" ${i===0?'disabled':''} onclick="moveField('${sp[0]}','${m.id}',-1)" aria-label="${esc(m.name)} nach oben">↑</button><button type="button" class="pill" ${i===arr.length-1?'disabled':''} onclick="moveField('${sp[0]}','${m.id}',1)" aria-label="${esc(m.name)} nach unten">↓</button></div></div>`).join('')}</details>`).join('')}</section>`;
+}
 function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmtDate(iso){if(!iso)return '';let m=String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1].slice(2)}`:iso}
 function parseDate(v){let m=String(v||'').trim().match(/^(\d{2})\.(\d{2})\.(\d{2})$/);if(!m)return null;let y=2000+Number(m[3]),mo=Number(m[2]),d=Number(m[1]),dt=new Date(y,mo-1,d);return dt.getFullYear()===y&&dt.getMonth()===mo-1&&dt.getDate()===d?`${y}-${m[2]}-${m[1]}`:null}
@@ -45,9 +92,9 @@ function nav(){return `<nav class="nav"><button onclick="go('home')">⌂<br>Star
 function render(){document.querySelector('#app').innerHTML=`<main class="shell">${view==='home'?home():view==='data'?dataPage():view==='sport'?sportPage():view==='chart'?chartPage():settings()}</main>${nav()}`;if(view==='settings')window.meinSportSync?.refreshUI();if(view==='chart')setTimeout(drawChart)}
 function home(){return `<div class="hero"><h1>Mein<br>Sport</h1><p>Deine Aktivitäten. Deine Daten.</p><button id="installBtn" class="btn" onclick="installApp()">${isStandalone()?'App ist installiert':'App installieren'}</button></div><div class="grid">${SPORTS.map(s=>`<button class="sport sport-${s[0]}" style="${sportStyle(s[0])}" onclick="openSport('${s[0]}')">${icon(s[0])}<b>${s[1]}</b><span class="small">${db.activities.filter(a=>a.sport===s[0]).length} Einträge</span></button>`).join('')}</div>`}
 function activitySummary(a){return Object.entries(a.values||{}).map(([id,v])=>{let m=db.metrics.find(x=>x.id===id);return m&&v!==''?`${esc(m.name)}: ${esc(v)} ${esc(m.unit||'')}`:''}).filter(Boolean).join(' · ')}
-function dataPage(){let arr=db.activities.filter(a=>dataSport==='all'||a.sport===dataSport);arr=[...arr].sort((a,b)=>dataSort==='date-asc'?a.date.localeCompare(b.date):dataSort==='sport'?((SPORTS.find(s=>s[0]===a.sport)?.[1]||'').localeCompare(SPORTS.find(s=>s[0]===b.sport)?.[1]||'')):b.date.localeCompare(a.date));return `<div class="top"><div class="brand">Daten</div><button class="btn" onclick="newEntry()">+ Eintrag</button></div><section class="panel data-tools"><label>Sportart<select onchange="dataSport=this.value;render()"><option value="all">Alle Sportarten</option>${SPORTS.map(s=>`<option value="${s[0]}" ${dataSport===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></label><label>Sortierung<select onchange="dataSort=this.value;render()"><option value="date-desc" ${dataSort==='date-desc'?'selected':''}>Neueste zuerst</option><option value="date-asc" ${dataSort==='date-asc'?'selected':''}>Älteste zuerst</option><option value="sport" ${dataSort==='sport'?'selected':''}>Sportart</option></select></label></section><div class="panel data-list">${arr.length?arr.map(a=>{let open=expandedActivity===a.id;let sp=SPORTS.find(s=>s[0]===a.sport);return `<article id="activity-${a.id}" class="activity activity-${a.sport} ${open?'open':''}" style="${sportStyle(a.sport)}"><button class="activity-summary" onclick="toggleActivity('${a.id}')"><span class="activity-icon">${icon(a.sport)}</span><span><b>${sp?.[1]}</b><span class="small">${fmtDate(a.date)}${activitySummary(a)?' · '+activitySummary(a):''}</span></span><span class="chev">${open?'⌃':'⌄'}</span></button>${open?`<div class="activity-detail"><dl><div><dt>Datum</dt><dd>${fmtDate(a.date)}</dd></div>${Object.entries(a.values||{}).map(([id,v])=>{let m=db.metrics.find(x=>x.id===id);return m&&v!==''?`<div><dt>${esc(m.name)}</dt><dd>${esc(v)}${m.unit?' '+esc(m.unit):''}</dd></div>`:''}).join('')}</dl><div class="row"><button class="btn" onclick="editAct('${a.id}')">Bearbeiten</button><button class="btn danger" onclick="delAct('${a.id}')">Löschen</button></div></div>`:''}</article>`}).join(''):'<div class="empty">Keine passenden Aktivitäten.</div>'}</div>`}
-function sportPage(){let a=editing?db.activities.find(x=>x.id===editing):null;if(a)current=a.sport;let sport=SPORTS.find(s=>s[0]===current),ms=current?db.metrics.filter(m=>m.sports.includes(current)):[];return `<div class="sport-context ${current?'sport-'+current:''}" style="${current?sportStyle(current):''}"><div class="sport-head">${current?icon(current):'<div class="sport-placeholder">+</div>'}<div><div class="brand">${sport?.[1]||'Eintragen'}</div><div class="small">${a?'Eintrag bearbeiten':'Neue Aktivität'}</div></div></div><form class="panel stack" onsubmit="saveAct(event)"><h2>${a?'Aktivität bearbeiten':'Neue Aktivität'}</h2><label>Sportart<select name="sport" onchange="chooseSport(this.value)" required><option value="">Bitte wählen …</option>${SPORTS.map(s=>`<option value="${s[0]}" ${current===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></label>${current?`<div class="notice">Alle Angaben sind optional und können später jederzeit ergänzt, geändert oder wieder geleert werden.</div><label>Datum (TT.MM.JJ)<input name="date" inputmode="numeric" placeholder="TT.MM.JJ"  value="${fmtDate(a?.date||new Date().toISOString().slice(0,10))}" required></label>${ms.map(m=>`<label>${esc(m.name)}${m.unit?' ('+esc(m.unit)+')':''}<input name="m_${m.id}" type="${m.type==='number'?'number':'text'}" step="any" value="${esc(a?.values?.[m.id]??'')}"></label>`).join('')}<button class="btn">${a?'Änderungen speichern':'Speichern'}</button>`:'<div class="notice">Wähle zuerst eine Sportart. Danach erscheinen die passenden, optionalen Datenfelder.</div>'}${a?`<button type="button" class="btn alt" onclick="cancelEdit()">Abbrechen</button>`:''}</form></div>`}
-function settings(){return `<div class="brand">Setup</div><section class="panel"><h2>Cloud-Synchronisierung</h2><p class="small">Mit demselben Google-Konto auf allen Geräten anmelden. Lokale Einträge werden beim ersten Verbinden übernommen.</p><div id="syncStatus" role="status">Nicht verbunden</div><div class="row"><button class="btn" onclick="window.meinSportSync?.signIn()" type="button">Mit Google verbinden</button><button class="btn alt" onclick="window.meinSportSync?.signOut()" type="button">Abmelden</button><button class="btn alt" onclick="window.meinSportSync?.syncNow()" type="button">Jetzt synchronisieren</button></div></section><section class="panel"><h2>Datenfelder</h2><p class="small">Die eingebauten Felder sind Vorschläge. Kein Feld ist verpflichtend. Du kannst Namen, Einheit und Zuordnung jederzeit ändern.</p>${db.metrics.map(m=>`<div class="metric"><span><b>${esc(m.name)}</b> ${esc(m.unit||'')}<br><span class="small">${m.sports.map(k=>SPORTS.find(s=>s[0]===k)?.[1]).join(', ')}</span></span><button class="pill" onclick="editMetric('${m.id}')">Ändern</button>${m.standard?'':`<button class="pill" onclick="delMetric('${m.id}')">×</button>`}</div>`).join('')}<h3>Eigenes Feld</h3><form class="stack" onsubmit="addMetric(event)"><input name="name" placeholder="z. B. Temperatur" required><input name="unit" placeholder="Einheit"><select name="type"><option value="number">Zahl</option><option value="text">Text</option></select><div class="checks">${SPORTS.map(s=>`<label class="check"><input type="checkbox" name="sports" value="${s[0]}">${s[1]}</label>`).join('')}</div><button class="btn">Datenfeld anlegen</button></form></section><section class="panel"><h2>Sicherung</h2><div class="row"><button class="btn" onclick="exportData()">JSON exportieren</button><button class="btn" onclick="exportXlsx()">XLSX exportieren</button><button class="btn alt" onclick="document.querySelector('#importFile').click()">JSON importieren</button></div></section>`}
+function dataPage(){let arr=db.activities.filter(a=>dataSport==='all'||a.sport===dataSport);arr=[...arr].sort((a,b)=>dataSort==='date-asc'?a.date.localeCompare(b.date):dataSort==='sport'?((SPORTS.find(s=>s[0]===a.sport)?.[1]||'').localeCompare(SPORTS.find(s=>s[0]===b.sport)?.[1]||'')):b.date.localeCompare(a.date));return `<div class="top"><div class="brand">Daten</div><button class="btn" onclick="newEntry()">+ Eintrag</button></div><section class="panel data-tools"><label>Sportart<select onchange="dataSport=this.value;render()"><option value="all">Alle Sportarten</option>${SPORTS.map(s=>`<option value="${s[0]}" ${dataSport===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></label><label>Sortierung<select onchange="dataSort=this.value;render()"><option value="date-desc" ${dataSort==='date-desc'?'selected':''}>Neueste zuerst</option><option value="date-asc" ${dataSort==='date-asc'?'selected':''}>Älteste zuerst</option><option value="sport" ${dataSort==='sport'?'selected':''}>Sportart</option></select></label></section><div class="panel data-list">${arr.length?arr.map(a=>{let open=expandedActivity===a.id;let sp=SPORTS.find(s=>s[0]===a.sport);return `<article id="activity-${a.id}" class="activity activity-${a.sport} ${open?'open':''}" style="${sportStyle(a.sport)}"><button class="activity-summary" onclick="toggleActivity('${a.id}')"><span class="activity-icon">${icon(a.sport)}</span><span><b>${esc(a.values?.title||sp?.[1])}</b><span class="small">${a.values?.title?esc(sp?.[1])+' · ':''}${fmtDate(a.date)}${activitySummary(a)?' · '+activitySummary(a):''}</span></span><span class="chev">${open?'⌃':'⌄'}</span></button>${open?`<div class="activity-detail"><dl><div><dt>Datum</dt><dd>${fmtDate(a.date)}</dd></div>${orderedMetrics(a.sport).map(m=>{let v=a.values?.[m.id];return v!==undefined&&v!==''?`<div><dt>${esc(m.name)}</dt><dd>${esc(v)}${m.unit?' '+esc(m.unit):''}</dd></div>`:''}).join('')}</dl><div class="row"><button class="btn" onclick="editAct('${a.id}')">Bearbeiten</button><button class="btn danger" onclick="delAct('${a.id}')">Löschen</button></div></div>`:''}</article>`}).join(''):'<div class="empty">Keine passenden Aktivitäten.</div>'}</div>`}
+function sportPage(){let a=editing?db.activities.find(x=>x.id===editing):null;if(a)current=a.sport;let sport=SPORTS.find(s=>s[0]===current),ms=current?orderedMetrics(current):[];return `<div class="sport-context ${current?'sport-'+current:''}" style="${current?sportStyle(current):''}"><div class="sport-head">${current?icon(current):'<div class="sport-placeholder">+</div>'}<div><div class="brand">${sport?.[1]||'Eintragen'}</div><div class="small">${a?'Eintrag bearbeiten':'Neue Aktivität'}</div></div></div><form class="panel stack" onsubmit="saveAct(event)"><h2>${a?'Aktivität bearbeiten':'Neue Aktivität'}</h2><label>Sportart<select name="sport" onchange="chooseSport(this.value)" required><option value="">Bitte wählen …</option>${SPORTS.map(s=>`<option value="${s[0]}" ${current===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></label>${current?`<div class="notice">Alle Angaben sind optional und können später jederzeit ergänzt, geändert oder wieder geleert werden.</div><label>Datum (TT.MM.JJ)<input name="date" inputmode="numeric" placeholder="TT.MM.JJ"  value="${fmtDate(a?.date||new Date().toISOString().slice(0,10))}" required></label>${ms.map(m=>`<label>${esc(m.name)}${m.unit?' ('+esc(m.unit)+')':''}${m.type==='select'?`<select name="m_${m.id}"><option value="">Bitte wählen (optional)</option>${[0,1,2,3,4,5].map(v=>`<option value="${v}" ${String(a?.values?.[m.id]??'')===String(v)?'selected':''}>${v} von 5 ausgefüllten Feldern</option>`).join('')}</select>`:`<input name="m_${m.id}" type="${m.type==='number'?'number':'text'}" ${m.type==='number'?'step="any"':''} value="${esc(a?.values?.[m.id]??'')}">`}</label>`).join('')}<button class="btn">${a?'Änderungen speichern':'Speichern'}</button>`:'<div class="notice">Wähle zuerst eine Sportart. Danach erscheinen die passenden, optionalen Datenfelder.</div>'}${a?`<button type="button" class="btn alt" onclick="cancelEdit()">Abbrechen</button>`:''}</form></div>`}
+function settings(){return `<div class="brand">Setup</div><section class="panel"><h2>Cloud-Synchronisierung</h2><p class="small">Mit demselben Google-Konto auf allen Geräten anmelden. Lokale Einträge werden beim ersten Verbinden übernommen.</p><div id="syncStatus" role="status">Nicht verbunden</div><div class="row"><button class="btn" onclick="window.meinSportSync?.signIn()" type="button">Mit Google verbinden</button><button class="btn alt" onclick="window.meinSportSync?.signOut()" type="button">Abmelden</button><button class="btn alt" onclick="window.meinSportSync?.syncNow()" type="button">Jetzt synchronisieren</button></div></section><section class="panel"><h2>Datenfelder</h2><p class="small">Die eingebauten Felder sind Vorschläge. Kein Feld ist verpflichtend. Du kannst Namen, Einheit und Zuordnung jederzeit ändern.</p>${db.metrics.map(m=>`<div class="metric"><span><b>${esc(m.name)}</b> ${esc(m.unit||'')}<br><span class="small">${m.sports.map(k=>SPORTS.find(s=>s[0]===k)?.[1]).join(', ')}</span></span><button class="pill" onclick="editMetric('${m.id}')">Ändern</button>${m.standard?'':`<button class="pill" onclick="delMetric('${m.id}')">×</button>`}</div>`).join('')}<h3>Eigenes Feld</h3><form class="stack" onsubmit="addMetric(event)"><input name="name" placeholder="z. B. Temperatur" required><input name="unit" placeholder="Einheit"><select name="type"><option value="number">Zahl</option><option value="text">Text</option></select><div class="checks">${SPORTS.map(s=>`<label class="check"><input type="checkbox" name="sports" value="${s[0]}">${s[1]}</label>`).join('')}</div><button class="btn">Datenfeld anlegen</button></form></section>${fieldOrderPanel()}<section class="panel"><h2>Sicherung</h2><div class="row"><button class="btn" onclick="exportData()">JSON exportieren</button><button class="btn" onclick="exportXlsx()">XLSX exportieren</button><button class="btn alt" onclick="document.querySelector('#importFile').click()">JSON importieren</button></div></section>`}
 function chartPage(){let options=CHARTS[chartSport]||[];if(!options.some(x=>x[0]===chartMetric))chartMetric=options[0]?.[0]||'distance';return `<div class="brand">Auswertung</div><section class="panel chart-panel sport-${chartSport}" style="${sportStyle(chartSport)}"><div class="chart-selectors"><label>Sportart<select onchange="setChartSport(this.value)">${SPORTS.map(s=>`<option value="${s[0]}" ${chartSport===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></label><label>Diagramm<select onchange="setChartMetric(this.value)">${options.map(o=>`<option value="${o[0]}" ${chartMetric===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></label></div><div class="chart-title"><span>${icon(chartSport)}</span><div><h2>${chartLabel(chartMetric)}</h2><p class="small">${SPORTS.find(s=>s[0]===chartSport)?.[1]} · Pinch zum Zoomen · Punkt antippen für Details</p></div></div><div class="interactive-chart"><canvas id="chart" width="760" height="430"></canvas><div id="chartTip" class="chart-tip" hidden></div></div><button class="pill chart-reset" onclick="resetChartZoom()">Ansicht zurücksetzen</button></section>`}
 function toggleActivity(id){expandedActivity=expandedActivity===id?null:id;render();setTimeout(()=>document.querySelector('#activity-'+id)?.scrollIntoView({block:'center',behavior:'smooth'}),20)}
 function jumpToActivity(id){dataSport='all';expandedActivity=id;view='data';render();setTimeout(()=>document.querySelector('#activity-'+id)?.scrollIntoView({block:'center',behavior:'smooth'}),50)}

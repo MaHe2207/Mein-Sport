@@ -6,7 +6,7 @@ const config={apiKey:'AIzaSyATAkQsftuIZM5n5MwtCQpf2bDtf0ZPj6o',authDomain:'mein-
 const app=initializeApp(config), auth=getAuth(app), store=getFirestore(app), provider=new GoogleAuthProvider();
 const KEY='meinSportDataV1',QUEUE='meinSportSyncQueueV1';
 let user=null,unsubscribe=null,busy=false,ready=false,status='Nicht verbunden',lastCloud=null;
-const kinds=['activities','metrics','favorites'];
+const kinds=['activities','metrics','favorites','settings'];
 const clone=x=>JSON.parse(JSON.stringify(x));
 function local(){try{return JSON.parse(localStorage.getItem(KEY))||{}}catch{return {}}}
 function pending(){try{return JSON.parse(localStorage.getItem(QUEUE))||{}}catch{return {}}}
